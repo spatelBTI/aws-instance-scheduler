@@ -34,6 +34,9 @@ INST_ENGINE_TYPE = "engine_type"
 INST_DB_ARN = "db_inst_arn"
 INST_DB_IS_CLUSTER = "is_cluster"
 
+SERV_IS_ONLINE = "is_online"
+SERV_IS_OFFLINE = "is_offline"
+
 PARAM_ACCOUNT = "account"
 PARAM_CONTEXT = "context"
 PARAM_DESIRED_TYPE = "desired_type"
@@ -50,6 +53,8 @@ PARAM_STACK = "stack_name"
 PARAM_CONFIG = "configuration"
 PARAM_CLUSTERS = "clusters"
 
+PARAM_STARTED_SERVERS = "started_servers"
+PARAM_STOPPED_SERVERS = "stopped_servers"
 
 # Services handled by the scheduler, the class that handles the logic for scheduling instances for each know service
 # must be registered here
