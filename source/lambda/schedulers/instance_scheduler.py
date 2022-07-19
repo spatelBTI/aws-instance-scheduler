@@ -39,6 +39,12 @@ INF_STARTING_INSTANCES = "Starting instances {} in region {}"
 INF_STOPPED_INSTANCES = "Stopping instances {} in region {}"
 INF_MAINTENANCE_WINDOW = "Maintenance window \"{}\" used as running period found for instance {}"
 
+INF_STARTING_SERVERS = "Starting TFR servers {} in region {}"
+INF_STOPPED_SERVERS = "Stopping TFR servers {} in region {}"
+
+DEBUG_SERVER_HEADER = "[ Server {} ]"
+DEBUG_CURRENT_SERVER_STATE = "Current state is {}, schedule is \"{}\""
+
 INF_DO_NOT_STOP_RETAINED_INSTANCE = "Instance {} was already running at start of period and schedule uses retain option, desired " \
                                     "state set to {} but instance will not be stopped if it is still running."
 
@@ -85,6 +91,10 @@ class InstanceScheduler:
         self._lambda_account = os.getenv(configuration.ENV_ACCOUNT)
         self._logger = None
         self._context = None
+        # TFR server
+        self._server_states = None
+        self._scheduler_start_list_tfr = []
+        self._scheduler_stop_list_tfr = []
 
         partition = "aws"
         try:
@@ -170,6 +180,12 @@ class InstanceScheduler:
         if name:
             s += " ({})".format(name)
         return s
+    
+    def _server_display_str(self, serv_id, name):
+        t = "{}:{}".format(self._service.service_name.upper(), serv_id)
+        if name:
+            t += " ({})".format(name)
+        return t
 
     def _scheduled_instances_in_region(self, account, region):
 
@@ -190,7 +206,27 @@ class InstanceScheduler:
             inst = as_namedtuple(self._service.service_name + "Instance", instance, excludes=["tags"])
             yield inst
 
+    def _scheduled_servers_in_region(self, account, region):
+        
+        # use service strategy to get a list of servers that can be scheduled for that service
+        for server in self._service.get_schedulable_servers({
+            schedulers.PARAM_SESSION: account.session,
+            schedulers.PARAM_ACCOUNT: account.name,
+            schedulers.PARAM_ROLE: account.role,
+            schedulers.PARAM_REGION: region,
+            schedulers.PARAM_CONFIG: self._configuration,
+            schedulers.PARAM_LOGGER: self._logger,
+            schedulers.PARAM_CONTEXT: self._context
+        }):
+            server["account"] = account.name
+            server["region"] = region
+            server["service"] = self._service.service_name
+            server["server_str"] = self._server_display_str(server["id"], server["name"])
+            serv = as_namedtuple(self._service.service_name + "Server", server, excludes=["tags"])
+            yield serv
+
     def run(self, state_table, scheduler_config, logger, lambda_account=None, context=None):
+        # TODO edit this for tfr servers
         """
         Runs the scheduler for a service
         :param state_table: name of the instance state table
@@ -241,6 +277,10 @@ class InstanceScheduler:
         # based on the schedule get the desired state and instance type for this instance
         inst_state, inst_type, _ = schedule.get_desired_state(instance, logger=self._logger)
         return inst_state, inst_type
+    #TODO
+    #NOTE called at 338          # (like called at #370 by #263 )
+    def get_desired_state_and_type_tfr(self, schedule, server):
+        pass
 
     def _process_account(self, account):
 
@@ -248,6 +288,9 @@ class InstanceScheduler:
         started_instances = {}
         stopped_instances = {}
         resized_instances = {}
+
+        started_servers = {}
+        stopped_servers = {}
 
         self._logger.info(INF_PROCESSING_ACCOUNT,
                           self._service.service_name.upper(), account.name,
@@ -258,12 +301,87 @@ class InstanceScheduler:
         for region in self._regions:
 
             state_loaded = False
+            state_loaded_tfr = False
             instances = []
+            servers = []
 
             self._scheduler_start_list = []
             self._scheduler_stop_list = []
             self._schedule_resize_list = []
 
+            self._scheduler_start_list_tfr = []
+            self._scheduler_stop_list_tfr = []
+
+            # TODO for loop for servers
+            for server in self._scheduled_servers_in_region(account, region):
+
+                # delay loading server state until first server is returned
+                if not state_loaded_tfr:
+                    self._server_states.load(account.name, region)
+                    state_loaded_tfr = True
+
+                servers.append(server)
+
+                # get the schedule for this instance
+                server_schedule = self._configuration.get_schedule(server.schedule_name)
+                if not server_schedule:
+                    self._logger.warning(WARN_SKIPPING_UNKNOWN_SCHEDULE, server.server_str, region,
+                                         server.account,
+                                         server.schedule_name)
+                    continue
+
+                self._logger.debug(DEBUG_SERVER_HEADER, server.server_str)
+                self._logger.debug(DEBUG_CURRENT_SERVER_STATE, server.current_state,
+                                   server_schedule.name)
+
+                # based on the schedule get the desired state
+                desired_state = self.get_desired_state_and_type_tfr(server_schedule, server)
+                                   
+                # get the  previous desired server state
+                last_desired_state = self._server_states.get_instance_state(server.id)
+                self._logger.debug(DEBUG_CURRENT_AND_DESIRED_STATE, server_schedule.name, desired_state,
+                                   last_desired_state,
+                                   server.current_state,
+                                   INF_DESIRED_TYPE.format(desired_type) if desired_type else "")
+                # last desired state None means this is the first time the server is seen by the scheduler
+                if last_desired_state is InstanceSchedule.STATE_UNKNOWN:
+                    # new servers that are running are optionally not stopped to allow them to finish possible initialization
+                    if server.is_online and desired_state == InstanceSchedule.STATE_OFFLINE:
+                        if not server_schedule.stop_new_servers:
+                            self._server_states.set_server_state(server.id, InstanceSchedule.STATE_OFFLINE)
+                            self._logger.debug(DEBUG_NEW_INSTANCE, server.server_str)
+                            continue
+                        self._process_new_desired_state(account, region, instance, desired_state,
+                                                        last_desired_state,
+                                                        server_schedule.retain_online)
+                    else:
+                        self._process_new_desired_state(account, region, instance, desired_state,
+                                                        last_desired_state,
+                                                        server_schedule.retain_online)
+
+                # existing instance
+                # if enforced check the actual state with the desired state enforcing the schedule state
+                elif server_schedule.enforced:
+                    if (server.is_online and desired_state == InstanceSchedule.STATE_OFFLINE) or (
+                            not server.is_online and desired_state == InstanceSchedule.STATE_ONLINE):
+                        self._logger.debug(DEBUG_ENFORCED_STATE, server.instance_str,
+                                           InstanceSchedule.STATE_ONLINE
+                                           if server.is_online
+                                           else InstanceSchedule.STATE_OFFLINE,
+                                           desired_state)
+                        self._process_new_desired_state(account, region, server, desired_state,
+                                                        last_desired_state,
+                                                        server_schedule.retain_online)
+                # if not enforced then compare the schedule state with the actual state so stat
+                # instance it will honor that state
+                elif last_desired_state != desired_state:
+                    self._process_new_desired_state(account, region, server, desired_state,
+                                                    last_desired_state,
+                                                    server_schedule.retain_online)
+
+                self._schedule_metrics.add_schedule_metrics(self._service.service_name, server_schedule, server)
+
+            #####################################################################
             for instance in self._scheduled_instances_in_region(account, region):
 
                 # delay loading instance state until first instance is returned
@@ -413,6 +531,7 @@ class InstanceScheduler:
             else:
                 self._usage_metrics["Resized"][type_change] = 1
 
+# TODO handle new state of a server
     # handle new state of an instance
     def _process_new_desired_state(self, account, region, instance, desired_state, desired_type, last_desired_state,
                                    retain_running):
@@ -530,10 +649,8 @@ class InstanceScheduler:
             }):
                 # set state based on returned state from start action
                 self._instance_states.set_instance_state(inst_id, state)
-
         if len(self._scheduler_stop_list) > 0:
-            self._logger.info(INF_STOPPED_INSTANCES, ", ".join([i.instance_str for i in self._scheduler_stop_list]),
-                              region)
+            self._logger.info(INF_STOPPED_INSTANCES, ", ".join([i.instance_str for i in self._scheduler_stop_list]), region)
             for inst_id, state in self._service.stop_instances({
                 schedulers.PARAM_SESSION: account.session,
                 schedulers.PARAM_ACCOUNT: account.name,
@@ -548,3 +665,38 @@ class InstanceScheduler:
             }):
                 # set state based on start of stop action
                 self._instance_states.set_instance_state(inst_id, state)
+
+# TODO for use in MY-tfr-service.py #88
+    def _start_and_stop_servers(self, account, region):
+        if len(self._scheduler_start_list_tfr) > 0:
+            self._logger.info(INF_STARTING_SERVERS,", ".join([i.server_str for i in self._scheduler_start_list_tfr]), region)
+            for server_id, state in self._service.start_servers({
+                schedulers.PARAM_SESSION: account.session,
+                schedulers.PARAM_ACCOUNT: account.name,
+                schedulers.PARAM_ROLE: account.role,
+                schedulers.PARAM_REGION: region,
+                schedulers.PARAM_TRACE: self._configuration.trace,
+                schedulers.PARAM_STARTED_SERVERS: self._scheduler_start_list_tfr,
+                schedulers.PARAM_LOGGER: self._logger,
+                schedulers.PARAM_CONTEXT: self._context,
+                schedulers.PARAM_STACK: self._stack_name,
+                schedulers.PARAM_CONFIG: self._scheduler_configuration
+            }):
+                self._server_states.set_server_state(server_id, state)
+        if len(self._scheduler_stop_list_tfr) > 0:
+            self._logger.info(INF_STOPPED_SERVERS, ", ".join([i.server_str for i in self._scheduler_stop_list_tfr]), region)
+            for inst_id, state in self._service.stop_instances({
+                schedulers.PARAM_SESSION: account.session,
+                schedulers.PARAM_ACCOUNT: account.name,
+                schedulers.PARAM_ROLE: account.role,
+                schedulers.PARAM_REGION: region,
+                schedulers.PARAM_TRACE: self._configuration.trace,
+                schedulers.PARAM_STOPPED_SERVERS: self._scheduler_stop_list_tfr,
+                schedulers.PARAM_LOGGER: self._logger,
+                schedulers.PARAM_CONTEXT: self._context,
+                schedulers.PARAM_STACK: self._stack_name,
+                schedulers.PARAM_CONFIG: self._scheduler_configuration
+            }):
+                # set state based on start of stop action
+                # TODO set_server_state in server_states.py
+                self._server_states.set_server_state(server_id, state)
