@@ -979,11 +979,11 @@ Resources:
     DependsOn:
     - EC2DynamoDBPolicy
     - Ec2PermissionsB6E87802
-    # TODO add tfr policy 
     - SchedulerPolicy
     - SchedulerRDSPolicy2E7C328A
     - SchedulerRoleDefaultPolicy66F774B8
     - SchedulerRole
+    - SchedulerTFRPolicy
     Metadata:
       cfn_nag:
         rules_to_suppress:
@@ -1177,7 +1177,6 @@ Resources:
     DeletionPolicy: Delete
     Metadata:
       aws:cdk:path: aws-instance-scheduler/ServiceSetup/Default
-# TODO TfrPermissions
   Ec2PermissionsB6E87802:
     Type: AWS::IAM::Policy
     Properties:
@@ -1218,7 +1217,6 @@ Resources:
           - cloudwatch:PutMetricData
           - ssm:DescribeMaintenanceWindows
           - tag:GetResources
-          # TODO for tfr, allow dynamo db to access tfr
           Effect: Allow
           Resource: "*"
         - Action:
@@ -1264,7 +1262,6 @@ Resources:
           Effect: Allow
           Resource:
             Fn::Sub: arn:${AWS::Partition}:ec2:*:${AWS::AccountId}:instance/*
-        # NOTE for TFR
         - Action:
           - transfer:StartServer
           - transfer:StopServer
@@ -1322,6 +1319,26 @@ Resources:
       - Ref: SchedulerRole
     Metadata:
       aws:cdk:path: aws-instance-scheduler/SchedulerRDSPolicy/Resource
+# Resources for TFR
+  SchedulerTFRPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyDocument:
+        Statement:
+        - Action:
+          - transfer:TagResource
+          - transfer:UntagResource
+          - transfer:StartServer
+          - transfer:StopServer
+          Effect: Allow
+          Resource:
+            Fn::Sub: arn:${AWS::Partition}:transfer:*:${AWS::AccountId}:server/*
+        Version: '2012-10-17'
+      PolicyName: SchedulerTFRPolicy
+      Roles:
+      - Ref: SchedulerRole
+    Metadata:
+      aws:cdk:path: aws-instance-scheduler/SchedulerTFRPolicy/Resource
 Outputs:
   AccountId:
     Description: 'Account to give access to when creating cross-account access role
