@@ -143,7 +143,6 @@ class tfrService:
         self._logger.info(INF_FETCHED_SERVERS, number_of_servers, len(servers))
         return servers
         
-# TODO _select_instance_data() # 459
     def _select_server_data(self, server, tagname, config):
         
         def get_tags(serv):
@@ -155,7 +154,6 @@ class tfrService:
         state = server["State"]
         is_online = self.TFR_STATE_ONLINE == state
         is_offline = self.TFR_STATE_OFFLINE == state
-        # TODO is_terminated equi. of tfr server - stopping or stopped or deleted?
         schedule_name = tags.get(tagname)
 
         maintenance_window_schedule = None
@@ -242,8 +240,7 @@ class tfrService:
                         self._logger.warning(WARN_STARTED_SERVERS_TAGGING,",".join(servers_starting, str(ex)))
                 
                 for i in servers_starting:
-                    # TODO STATE_STARTING defined in server_schedule.py 
-                    yield i, ServerSchedule.STATE_STARTING
+                    yield i, InstanceSchedule.STATE_RUNNING
             except Exception as ex:
                 self._logger.error(ERR_STARTING_SERVERS,",".join(server_ids), str(ex))
 
@@ -300,7 +297,7 @@ class tfrService:
                         self._logger.warning(WARN_STOPPED_SERVERS_TAGGING, ",".join(servers_stopping), str(ex))
 
                 for i in servers_stopping:
-                    yield i, ServerSchedule.STATE_STARTING
+                    yield i, InstanceSchedule.STATE_STOPPED
                 
             except Exception as ex:
                 self._logger.error(ERR_STOPPING_SERVERS, ",".join(server_ids), str(ex))
