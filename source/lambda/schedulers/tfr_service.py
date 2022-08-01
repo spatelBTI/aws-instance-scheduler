@@ -1,19 +1,26 @@
 # sys.path.insert(0, "C:\\Users\\spatel\\Documents\\GitHub\\aws-instance-scheduler\\source\\lambda")
-
-from http import client
-import time
 import os
+import boto3
+import time
+from datetime import timedelta, datetime, timezone
+import dateutil
+import jmespath
+import pytz
+from botocore.exceptions import ClientError
 
-import sys
-from tracemalloc import start
-from xmlrpc import server
+import configuration
+import schedulers
+import time
+from boto_retry import get_client_with_retries
+from configuration import SchedulerConfigBuilder
+from configuration.instance_schedule import InstanceSchedule
+from configuration.running_period import RunningPeriod
+from boto3.dynamodb.conditions import Key
 
-from yaml import NodeEvent
 from configuration.server_schedule import ServerSchedule
 
-START_BATCH_SIZE = 5
-import jmespath
-import schedulers
+START_TFR_BATCH_SIZE = 5
+
 # AWS_ACCESS_KEY_ID =  os.environ['AWS_ACCESS_KEY_ID']
 # AWS_SECRET_ACCESS_KEY = os.environ['AWS_SECRET_ACCESS_KEY']
 # AWS_SESSION_TOKEN = os.environ['AWS_SESSION_TOKEN']
@@ -27,6 +34,11 @@ import boto3
 from boto_retry import get_client_with_retries
 ERR_STARTING_SERVERS = "Error starting servers {}, ({})"
 ERR_STOPPING_SERVERS = "Error stopping servers {}, ({})"
+ERR_MAINT_WINDOW_NOT_FOUND_OR_DISABLED = "SSM maintenance window {} used in schedule {} not found or disabled"
+
+INF_FETCHING_SERVERS = " Fetching tfr servers for account {} in region {}"
+INF_FETCHED_SERVERS = "Number of fetched tfr servers is {}, number of servers in a schedulable state is {}"
+
 WARNING_SERVER_NOT_STARTING = "TFR server {} is not started"
 
 WARNING_SERVER_NOT_STOPPING = "TFR server {} is not stopped"
@@ -34,13 +46,15 @@ INF_ADD_KEYS = "Adding {} ket(s) {} to servers(s) {}"
 WARN_STARTED_SERVERS_TAGGING = "Error deleting or creating tags for started TFR servers {} ({})"
 WARN_STOPPED_SERVERS_TAGGING = "Error deleting or creating tags for stopped TFR servers {} ({})"
 
+DEBUG_SKIPPED_SERVER = "Skpping tfr server {} because it is not in a schedulable state ({})"
+DEBUG_SELECTED_SERVERS = "Selected tfr server {} in state ({})"
+
 #client = boto3.client('transfer', _region='us-east-1')
 
 #serverId = ['s-29c57eaef00c4b4cb']
 #_region = 'us-east-1'
 class tfrService:
     print("***** inside the class *****")
-    # TODO check if server lifecycle has states = stopping or starting or is it pending?
     TFR_STATE_ONLINE = "online"
     TFR_STATE_OFFLINE = "offline"
     TFR_STATE_STARTING = "starting"
@@ -79,10 +93,97 @@ class tfrService:
                 server_buffer = []
         if len(server_buffer) > 0:
             yield server_buffer
-    # TODO from ec2_servic.py
-    def get_schedulable_servers():
-        pass
-    
+# new method added
+    def get_schedulable_servers(self, kwargs):
+        self._session = kwargs[schedulers.PARAM_SESSION]
+        context = kwargs[schedulers.PARAM_CONTEXT]
+        region = kwargs[schedulers.PARAM_REGION]
+        account = kwargs[schedulers.PARAM_LOGGER]
+        self._logger = kwargs[schedulers.PARAM_LOGGER]
+        tagname = kwargs[schedulers.PARAM_CONFIG].tag_name
+        config = kwargs[schedulers.PARAM_CONFIG]
+
+        self.logger.info("Enable SSM Maintenance window is set to {}", config.enable_SSM_maintenance_windows)
+        if config.enable_SSM_maintenance_windows:
+            self._logger.debug("load the ssm maintenance windows for account {}, and region {}", account, region)        
+            self._ssm_maintenance_windows = self._ssm_maintenance_windows(self._)        
+            self._logger.debug("finish loading the ssm maintenance windows")
+        
+        client = get_client_with_retries("transfer",["describe_server"], context = context, session = self._session, region = region)
+        
+        def is_in_schedulable_state(tfr_serv):
+            state = tfr_serv["state"]
+            return state in tfrService.TFR_SCHEDULABLE_STATES
+
+        jmes = "Servers[*].{ServerId:ServerId, State:State, Tags:Tags}[]" + \
+                "|[?Tags]|[?contains(Tags[*].Key, '{}')]".format(tagname)
+        
+        args = {}
+        number_of_servers = 0
+        servers = []
+        done = False 
+
+        self._logger.info(INF_FETCHING_SERVERS, account, region)
+
+        while not done:
+
+            server_resp = client.describe_server_with_retries(**args)
+            for server_list in jmespath.search(jmes, server_resp):
+                serv = self._select_server_data(server=server_list, tagname=tagname, config=config)
+                number_of_servers += 1
+                if is_in_schedulable_state(serv):
+                    servers.append(serv)
+                    self._logger.debug(DEBUG_SELECTED_SERVERS, serv[schedulers.SERV_ID], serv[schedulers.SERV_STATE_NAME])
+                else:
+                    self._logger.debug(DEBUG_SKIPPED_SERVER, serv[schedulers.SERV_ID], serv[schedulers.SERV_STATE_NAME])
+            if "NextToken" in server_resp:
+                args["NextToken"] = server_resp["NextToken"]
+            else:
+                done = True
+        self._logger.info(INF_FETCHED_SERVERS, number_of_servers, len(servers))
+        return servers
+        
+# TODO _select_instance_data() # 459
+    def _select_server_data(self, server, tagname, config):
+        
+        def get_tags(serv):
+            return {tag["Key"]: tag["Value"] for tag in serv["Tags"]} if "Tags" in serv else {}
+
+        tags = get_tags(server)
+        name = tags.get("Name", "")
+        server_id = server["ServerId"]
+        state = server["State"]
+        is_online = self.TFR_STATE_ONLINE == state
+        is_offline = self.TFR_STATE_OFFLINE == state
+        # TODO is_terminated equi. of tfr server - stopping or stopped or deleted?
+        schedule_name = tags.get(tagname)
+
+        maintenance_window_schedule = None
+        schedule = config.schedules.get(schedule_name, None)
+        if schedule is not None:
+            if schedule.use_maintenance_window and schedule.ssm_maintenance_window not in [None, ""]:
+                maintenance_window_schedule = self._ssm_maintenance_windows.get(schedule.ssm_maintenance_window, None)
+                if maintenance_window_schedule is None:
+                    self._logger.error(ERR_MAINT_WINDOW_NOT_FOUND_OR_DISABLED, schedule.ssm_maintenance_window,
+                                       schedule.name)
+                    self._ssm_maintenance_windows[schedule.ssm_maintenance_window] = "NOT-FOUND"
+                if maintenance_window_schedule == "NOT-FOUND":
+                    maintenance_window_schedule = None
+        server_data = {
+            schedulers.SERV_ID: server_id,
+            schedulers.SERV_SCHEDULE: schedule_name,
+            schedulers.SERV_NAME: name,
+            schedulers.SERV_STATE: state,
+            schedulers.SERV_STATE_NAME: server["State"]["Name"],
+            schedulers.SERV_IS_ONLINE: is_online,
+            schedulers.SERV_IS_OFFLINE: is_offline,
+            schedulers.SERV_CURRENT_STATE: InstanceSchedule.STATE_ONLINE if is_online else InstanceSchedule.STATE_STOPPED,
+            schedulers.INST_INSTANCE_TYPE: server["InstanceType"],
+            schedulers.SERV_TAGS: tags,
+            schedulers.SERV_MAINTENANCE_WINDOW: maintenance_window_schedule
+        }
+        return server_data
+
     def get_tfr_server_status(self, client, server_ids):
         print("***** inside get_tfr_server_status *****")
         servers = client.describe_server_with_retries(ServerId=server_ids)
@@ -107,7 +208,7 @@ class tfrService:
         methods = ["start_server", "describe_server", "create_tags", "delete_tags"]
         client = get_client_with_retries("transfer", methods= methods, context= self._context, session= self._session, region= self._region)
 
-        for server_batch in list(self.server_batches(servers_to_start, START_BATCH_SIZE)):
+        for server_batch in list(self.server_batches(servers_to_start, START_TFR_BATCH_SIZE)):
             server_ids = [i.id for i in server_batch]
             try:
                 start_response = client.start_server_with_retries(ServerId=server_ids)
@@ -141,7 +242,7 @@ class tfrService:
                         self._logger.warning(WARN_STARTED_SERVERS_TAGGING,",".join(servers_starting, str(ex)))
                 
                 for i in servers_starting:
-                    # TODO STATE_STARTING defined in server_scheduel.py 
+                    # TODO STATE_STARTING defined in server_schedule.py 
                     yield i, ServerSchedule.STATE_STARTING
             except Exception as ex:
                 self._logger.error(ERR_STARTING_SERVERS,",".join(server_ids), str(ex))

@@ -38,6 +38,8 @@ class InstanceSchedule:
     STATE_STOPPED_FOR_RESIZE = "stopped_for_resize"
     STATE_RUNNING = "running"
     STATE_RETAIN_RUNNING = "retain-running"
+    STATE_OFFLINE = "offline" 
+    STATE_ONLINE = "online"
 
     def __init__(self, name,
                  periods=None,

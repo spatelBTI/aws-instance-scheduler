@@ -13,7 +13,9 @@
 
 import os
 
+#..\source\lambda\configuration\config_dynamodb_adapter.py
 from configuration.config_dynamodb_adapter import ConfigDynamodbAdapter
+#..\source\lambda\configuration\scheduler_config_builder.py
 from configuration.scheduler_config_builder import SchedulerConfigBuilder
 
 # environment parameter for configuration table

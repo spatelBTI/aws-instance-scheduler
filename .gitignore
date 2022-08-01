@@ -115,3 +115,4 @@ source/deploy
 source/code/sample_events
 .vscode
 __pycache__
+source/lambda/aws-instance-scheduler-JSON.template

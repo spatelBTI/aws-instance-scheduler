@@ -2,8 +2,12 @@ from unittest import mock
 import os
 from configuration.instance_schedule import InstanceSchedule
 
+
 mock.patch.dict(os.environ, {'MAINTENANCE_WINDOW_TABLE': 'test_table'}).start()
 from schedulers import Ec2Service
+
+from schedulers import TfrService
+
 from util.named_tuple_builder import as_namedtuple
 from schedulers.instance_scheduler import InstanceScheduler
 
@@ -32,10 +36,14 @@ def test_get_desired_state_and_type_1(mocker):
     instance["id"] = 'ut12y21232u'
     inst = as_namedtuple('ec2' + "Instance", instance, excludes=["tags"])
     ec2_service = Ec2Service()
+    tfr_service = TfrService()
     scheduler_configuration = {}
     scheduler = InstanceScheduler(ec2_service, scheduler_configuration)
+    scheduler_tfr = InstanceSchedule(tfr_service, scheduler_configuration)
     mocker.patch.object(scheduler, '_logger')
+    serv = as_namedtuple('tfr' + "Server", server, excludes=["tagd"])
     inst_state, inst_type = scheduler.get_desired_state_and_type(schedule, inst)
+    serv_state = scheduler.get_desired_state_and_type_tfr(schedule, serv)
     assert inst_state == 'stopped'
 
 
