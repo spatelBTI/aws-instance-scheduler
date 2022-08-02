@@ -53,7 +53,8 @@ DEBUG_SELECTED_SERVERS = "Selected tfr server {} in state ({})"
 
 #serverId = ['s-29c57eaef00c4b4cb']
 #_region = 'us-east-1'
-class tfrService:
+#TfrService
+class TfrService:
     print("***** inside the class *****")
     TFR_STATE_ONLINE = "online"
     TFR_STATE_OFFLINE = "offline"
@@ -113,7 +114,7 @@ class tfrService:
         
         def is_in_schedulable_state(tfr_serv):
             state = tfr_serv["state"]
-            return state in tfrService.TFR_SCHEDULABLE_STATES
+            return state in TfrService.TFR_SCHEDULABLE_STATES
 
         jmes = "Servers[*].{ServerId:ServerId, State:State, Tags:Tags}[]" + \
                 "|[?Tags]|[?contains(Tags[*].Key, '{}')]".format(tagname)
@@ -192,7 +193,7 @@ class tfrService:
     def start_server(self, kwargs):
         print("***** inside start_server *****")
         def is_in_starting_state(state):
-            return (state) in tfrService.TFR_STARTING_STATES
+            return (state) in TfrService.TFR_STARTING_STATES
         
         self._init_scheduler(kwargs)
 
@@ -248,7 +249,7 @@ class tfrService:
     def stop_server(self, kwargs):
         
         def is_in_stopping_state(state):
-            return (state) in tfrService.TFR_STOPPING_STATES
+            return (state) in TfrService.TFR_STOPPING_STATES
         
         self._init_scheduler(kwargs)
 
@@ -302,8 +303,8 @@ class tfrService:
             except Exception as ex:
                 self._logger.error(ERR_STOPPING_SERVERS, ",".join(server_ids), str(ex))
 
-# # Instance of class tfrService
-# Object = tfrService()
+# # Instance of class TfrService
+# Object = TfrService()
 
 # # Calling start_server function
 # Object.start_server(serverId)
