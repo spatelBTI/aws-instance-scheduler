@@ -1,4 +1,5 @@
 # sys.path.insert(0, "C:\\Users\\spatel\\Documents\\GitHub\\aws-instance-scheduler\\source\\lambda")
+
 import os
 import boto3
 import time
@@ -16,8 +17,6 @@ from configuration import SchedulerConfigBuilder
 from configuration.instance_schedule import InstanceSchedule
 from configuration.running_period import RunningPeriod
 from boto3.dynamodb.conditions import Key
-
-from configuration.server_schedule import ServerSchedule
 
 START_TFR_BATCH_SIZE = 5
 
@@ -94,7 +93,39 @@ class TfrService:
                 server_buffer = []
         if len(server_buffer) > 0:
             yield server_buffer
-# new method added
+
+#TODO 1
+    def get_ssm_windows_service():
+        pass
+
+#TODO 2
+    def get_ssm_windows_db():
+        pass
+
+#TODO 3
+    def process_ssm_windows():
+        pass
+
+#TODO 4
+    def check_window_running():
+        pass
+
+#TODO 5
+    def put_window_dynamodb():
+        pass
+
+#TODO 6
+    def remove_unused_windows():
+        pass
+
+#TODO 7
+    def get_ssm_windows():
+        pass
+
+#TODO 8
+    def ssm_maintenance_windows():
+        pass
+
     def get_schedulable_servers(self, kwargs):
         self._session = kwargs[schedulers.PARAM_SESSION]
         context = kwargs[schedulers.PARAM_CONTEXT]
@@ -144,6 +175,10 @@ class TfrService:
         self._logger.info(INF_FETCHED_SERVERS, number_of_servers, len(servers))
         return servers
         
+#TODO 9
+    def _schedule_from_maintenance_window():
+        pass
+
     def _select_server_data(self, server, tagname, config):
         
         def get_tags(serv):
