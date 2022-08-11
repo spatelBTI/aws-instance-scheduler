@@ -982,7 +982,6 @@ Resources:
     - SchedulerPolicy
     - SchedulerRDSPolicy2E7C328A
     - SchedulerRoleDefaultPolicy66F774B8
-    - SchedulerRole
     - SchedulerTFRPolicy
     Metadata:
       cfn_nag:
@@ -1109,7 +1108,7 @@ Resources:
         Id: Target0
     Metadata:
       aws:cdk:path: aws-instance-scheduler/EventlambdaConstruct/EventsRule/Resource
-  SchedulerConfigHelper:
+  SchedulerConfigHelperTFR:
     Type: Custom::ServiceSetup
     Properties:
       ServiceToken:

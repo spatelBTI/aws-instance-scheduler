@@ -54,7 +54,6 @@ DEBUG_SELECTED_SERVERS = "Selected tfr server {} in state ({})"
 #_region = 'us-east-1'
 #TfrService
 class TfrService:
-    print("***** inside the class *****")
     TFR_STATE_ONLINE = "online"
     TFR_STATE_OFFLINE = "offline"
     TFR_STATE_STARTING = "starting"
@@ -68,14 +67,14 @@ class TfrService:
     #maintenance_table = dynamodb.Table(os.environ['MAINTENANCE_WINDOW_TABLE'])
 
     def __init__(self):
-        print("***** inside __init__ *****")
+
         self.service_name = "transfer"
         self._ssm_maintenance_windows = None
         self._session = None
         self._logger = None
     
     def _init_scheduler(self,args):
-        print("***** _init_scheduler *****")
+
         self._session = args.get(schedulers.PARAM_SESSION)
         self._context = args.get(schedulers.PARAM_CONTEXT)
         self._region = args.get(schedulers.PARAM_REGION)
@@ -84,7 +83,7 @@ class TfrService:
         self._tagname = args.get(schedulers.PARAM_TAG_NAME)
     
     def server_batches(cls, servers, size):
-        print("***** inside server_batches  *****")
+
         server_buffer = []
         for server in servers:
             server_buffer.append(server)
@@ -219,14 +218,14 @@ class TfrService:
         return server_data
 
     def get_tfr_server_status(self, client, server_ids):
-        print("***** inside get_tfr_server_status *****")
+
         servers = client.describe_server_with_retries(ServerId=server_ids)
         # print(servers)
         jmes = "Servers[*].{ServerId:ServerId, State:State}[]"
         return jmespath.search(jmes, servers)
     
     def start_server(self, kwargs):
-        print("***** inside start_server *****")
+
         def is_in_starting_state(state):
             return (state) in TfrService.TFR_STARTING_STATES
         
