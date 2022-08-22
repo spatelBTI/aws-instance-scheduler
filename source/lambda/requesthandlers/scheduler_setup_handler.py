@@ -27,6 +27,7 @@ from util.logger import Logger
 from util.metrics import allow_send_metrics, send_metrics_data
 
 ERR_SETTING_CONFIG = "Error setting scheduler configuration {} "
+#INFO    : Error setting scheduler configuration tfr is not a supported service 
 ERR_SETTING_RETENTION_LAMBDA_LOGGROUP = "Error setting or deleting retention period for log group {} ({})"
 
 INF_CONFIG_SET = "Scheduler configuration set to {}"
@@ -203,7 +204,8 @@ class SchedulerSetupHandler(CustomResource):
                                            enable_SSM_maintenance_windows=self.enable_SSM_maintenance_windows.lower() == "true",
                                            started_tags=self.started_tags,
                                            stopped_tags=self.stopped_tags)
-
+            self.logger.info("Logging for debugging, tfr should be printed out")
+            self.logger.info(str(self.scheduled_services))
             self._logger.info(INF_CONFIG_SET, str(settings))
 
         except Exception as ex:
