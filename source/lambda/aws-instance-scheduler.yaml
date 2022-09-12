@@ -680,7 +680,7 @@ Resources:
       RetentionInDays:
         Ref: LogRetentionDays
     UpdateReplacePolicy: Delete
-    DeletionPolicy: Delete
+    DeletionPolicy: Retain
     Metadata:
       cfn_nag:
         rules_to_suppress:
@@ -1108,7 +1108,7 @@ Resources:
         Id: Target0
     Metadata:
       aws:cdk:path: aws-instance-scheduler/EventlambdaConstruct/EventsRule/Resource
-  SchedulerConfigHelperTFR:
+  SchedulerConfigHelper:
     Type: Custom::ServiceSetup
     Properties:
       ServiceToken:

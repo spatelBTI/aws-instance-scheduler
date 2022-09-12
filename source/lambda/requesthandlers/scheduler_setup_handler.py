@@ -27,7 +27,6 @@ from util.logger import Logger
 from util.metrics import allow_send_metrics, send_metrics_data
 
 ERR_SETTING_CONFIG = "Error setting scheduler configuration {} "
-#INFO    : Error setting scheduler configuration tfr is not a supported service 
 ERR_SETTING_RETENTION_LAMBDA_LOGGROUP = "Error setting or deleting retention period for log group {} ({})"
 
 INF_CONFIG_SET = "Scheduler configuration set to {}"
