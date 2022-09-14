@@ -1,5 +1,11 @@
 {
   "compilerOptions": {
+    "isolatedModules": true,
+    "forceConsistentCasingInFileNames": true,
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "allowJs": true,
+    "moduleResolution": "node",
     "alwaysStrict": true,
     "charset": "utf8",
     "declaration": true,
@@ -9,7 +15,7 @@
     "lib": [
       "es2018"
     ],
-    "module": "CommonJS",
+    "module": "commonjs",
     "noEmitOnError": true,
     "noFallthroughCasesInSwitch": true,
     "noImplicitAny": true,
@@ -17,6 +23,11 @@
     "noImplicitThis": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
+    "paths": {
+      "@module": [
+        "./lib"
+      ]
+    },
     "resolveJsonModule": true,
     "strict": true,
     "strictNullChecks": true,
