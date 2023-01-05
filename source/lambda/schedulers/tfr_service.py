@@ -1,4 +1,3 @@
-# sys.path.insert(0, "C:\\Users\\spatel\\Documents\\GitHub\\aws-instance-scheduler\\source\\lambda")
 
 import os
 import boto3
@@ -20,14 +19,6 @@ from boto3.dynamodb.conditions import Key
 
 START_TFR_BATCH_SIZE = 5
 
-# AWS_ACCESS_KEY_ID =  os.environ['AWS_ACCESS_KEY_ID']
-# AWS_SECRET_ACCESS_KEY = os.environ['AWS_SECRET_ACCESS_KEY']
-# AWS_SESSION_TOKEN = os.environ['AWS_SESSION_TOKEN']
-
-
-# use EE-ENG-R1C servers :
-# s-29c57eaef00c4b4cb 
-
 import boto3
 
 from boto_retry import get_client_with_retries
@@ -48,11 +39,8 @@ WARN_STOPPED_SERVERS_TAGGING = "Error deleting or creating tags for stopped TFR 
 DEBUG_SKIPPED_SERVER = "Skpping tfr server {} because it is not in a schedulable state ({})"
 DEBUG_SELECTED_SERVERS = "Selected tfr server {} in state ({})"
 
-#client = boto3.client('transfer', _region='us-east-1')
+MY_DEBUG = "1/3/2023 10:35 client = get_client_with_retries() {}"
 
-#serverId = ['s-29c57eaef00c4b4cb']
-#_region = 'us-east-1'
-#TfrService
 class TfrService:
     TFR_STATE_ONLINE = "online"
     TFR_STATE_OFFLINE = "offline"
@@ -64,7 +52,7 @@ class TfrService:
     TFR_SCHEDULABLE_STATES = {TFR_STATE_ONLINE, TFR_STATE_OFFLINE}
 
     dynamodb = boto3.resource('dynamodb')
-    #maintenance_table = dynamodb.Table(os.environ['MAINTENANCE_WINDOW_TABLE'])
+    maintenance_table = dynamodb.Table(os.environ['MAINTENANCE_WINDOW_TABLE'])
 
     def __init__(self):
 
@@ -125,23 +113,30 @@ class TfrService:
     def ssm_maintenance_windows():
         pass
 
-    def get_schedulable_servers(self, kwargs):
+    def get_schedulable_instances(self, kwargs):
+
         self._session = kwargs[schedulers.PARAM_SESSION]
         context = kwargs[schedulers.PARAM_CONTEXT]
         region = kwargs[schedulers.PARAM_REGION]
-        account = kwargs[schedulers.PARAM_LOGGER]
+        account = kwargs[schedulers.PARAM_ACCOUNT]
         self._logger = kwargs[schedulers.PARAM_LOGGER]
         tagname = kwargs[schedulers.PARAM_CONFIG].tag_name
         config = kwargs[schedulers.PARAM_CONFIG]
-
-        self.logger.info("Enable SSM Maintenance window is set to {}", config.enable_SSM_maintenance_windows)
+        
+        self._logger.info('inside ----------------- def get_schedulable_instances()')
+    
+        self._logger.info("Enable SSM Maintenance window is set to {}", config.enable_SSM_maintenance_windows)
         if config.enable_SSM_maintenance_windows:
             self._logger.debug("load the ssm maintenance windows for account {}, and region {}", account, region)        
             self._ssm_maintenance_windows = self._ssm_maintenance_windows(self._)        
             self._logger.debug("finish loading the ssm maintenance windows")
         
         client = get_client_with_retries("transfer",["describe_server"], context = context, session = self._session, region = region)
-        
+        self._logger.debug(MY_DEBUG, client)
+        # def __repr__(self):
+        #     return self._logger.debug(MY_DEBUG, client.__str__())
+       
+
         def is_in_schedulable_state(tfr_serv):
             state = tfr_serv["state"]
             return state in TfrService.TFR_SCHEDULABLE_STATES
@@ -179,6 +174,9 @@ class TfrService:
         pass
 
     def _select_server_data(self, server, tagname, config):
+        
+        self._init_scheduler(kwargs)
+        self._logger.info('inside ----------------- def _select_server_data()')
         
         def get_tags(serv):
             return {tag["Key"]: tag["Value"] for tag in serv["Tags"]} if "Tags" in serv else {}
@@ -218,31 +216,34 @@ class TfrService:
         return server_data
 
     def get_tfr_server_status(self, client, server_ids):
-
+        self._init_scheduler(kwargs)
+        self._logger.info('inside ----------------- def get_tfr_server_status()')
         servers = client.describe_server_with_retries(ServerId=server_ids)
-        # print(servers)
+        self._logger.debug('________________ servers', servers)
         jmes = "Servers[*].{ServerId:ServerId, State:State}[]"
+        #self._logger.debug('________________ jmes', jmes)
         return jmespath.search(jmes, servers)
     
     def start_server(self, kwargs):
-
+        
         def is_in_starting_state(state):
             return (state) in TfrService.TFR_STARTING_STATES
         
         self._init_scheduler(kwargs)
-
+        self._logger.info('inside ----------------- def start_server()')
         servers_to_start = kwargs[schedulers.PARAM_STARTED_SERVERS]
-        print("servers_to_start", servers_to_start)
+        self._logger.debug('________________ servers_to_start', servers_to_start)
         start_tags = kwargs[schedulers.PARAM_CONFIG].started_tags
         if start_tags is None:
             start_tags = []
         start_tags_key_names = [t["Key"] for t in start_tags]
         stop_tags_keys = [{"Key": t["Key"]} for t in kwargs[schedulers.PARAM_CONFIG].stopped_tags if t["Key"] not in start_tags_key_names]
         methods = ["start_server", "describe_server", "create_tags", "delete_tags"]
-        client = get_client_with_retries("transfer", methods= methods, context= self._context, session= self._session, region= self._region)
+        client = get_client_with_retries("transfer", methods=methods, context= self._context, session= self._session, region= self._region)
 
         for server_batch in list(self.server_batches(servers_to_start, START_TFR_BATCH_SIZE)):
             server_ids = [i.id for i in server_batch]
+            self._logger.debug('________________ server_ids', server_ids)
             try:
                 start_response = client.start_server_with_retries(ServerId=server_ids)
                 servers_starting = [i["ServerId"] for i in start_response.get("StartingServers",[]) if is_in_starting_state(i.get("CurrentState",{}))]
@@ -252,7 +253,7 @@ class TfrService:
                     time.sleep(5)
 
                     servers_starting = [i["ServerId"] for i in self.get_tfr_server_status(client, server_ids) if is_in_starting_state(i.get("State",{}))]
-
+                    self._logger.debug('________________ servers_starting', servers_starting)
                     if len(servers_starting) == len(server_ids):
                         break
 
@@ -286,7 +287,7 @@ class TfrService:
             return (state) in TfrService.TFR_STOPPING_STATES
         
         self._init_scheduler(kwargs)
-
+        self._logger.info('inside ----------------- def stop_server()')
         stopped_servers = kwargs[schedulers.PARAM_STOPPED_SERVERS]
         stop_tags = kwargs[schedulers.PARAM_CONFIG].stopped_tags
         if stop_tags is None:
@@ -336,9 +337,3 @@ class TfrService:
                 
             except Exception as ex:
                 self._logger.error(ERR_STOPPING_SERVERS, ",".join(server_ids), str(ex))
-
-# # Instance of class TfrService
-# Object = TfrService()
-
-# # Calling start_server function
-# Object.start_server(serverId)
